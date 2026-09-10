@@ -27,8 +27,10 @@ SignalR hub: `/hubs/orders`, authenticated with the same bearer token. Query acc
 - `StateChanged`: invalidation only; clients fetch their authorized state.
 - `FoodReady`: notification addressed to the placing waiter's user ID, with id, userId, orderId, message, createdAt, read.
 
-Notifications persist in PostgreSQL in the same transaction as Ready. Clients recover on reconnect and every 30 seconds. Event transport is best-effort; there is no transactional outbox. For multi-instance scale, add a SignalR backplane and an outbox dispatcher if guaranteed low-latency retries are required.
+Notifications persist in PostgreSQL in the same transaction as Ready. Clients recover on reconnect and every 90 seconds while visible. Event transport is best-effort; there is no transactional outbox. For multi-instance scale, add a SignalR backplane and an outbox dispatcher if guaranteed low-latency retries are required.
 
 Database tables: Users, Categories, MenuItems, Tables, PaymentMethods, Sessions, Orders, OrderItems, Bills, Notifications, OrderEvents. Entity Framework migrations include foreign keys, unique email/category/table/method names, one open session per table, one bill per session, decimal precision and legal state/role/quantity constraints. `docs/database.sql` is generated from the same migrations.
 
 Security boundaries: no password hashes leave API responses; PBKDF2 password hashing via ASP.NET Identity; exact CORS allowlist; JWT signature/issuer/audience/lifetime checks; active-role validation per request; no automatic schema modifications at application startup. Record archived history rather than hard-deleting referenced data.
+
+Order creation also accepts clientRequestId (UUID). Reuse the same ID and payload after a lost response. The server returns the existing order for matching retries and rejects changed payloads. Status retries acknowledge an already-reached stage without moving backwards. See LOW-NETWORK.md.

@@ -39,11 +39,13 @@ public class RestaurantDb(DbContextOptions<RestaurantDb> options):DbContext(opti
 }
 public record LoginRequest(string Email,string Password);
 public record ItemRequest(int MenuItemId,int Quantity);
-public record OrderRequest(int TableId,List<ItemRequest> Items,string? Instructions);
+public record OrderRequest(int TableId,List<ItemRequest> Items,string? Instructions,Guid? ClientRequestId=null);
 public record StatusRequest(string Status);
 public record PayRequest(int PaymentMethodId,string? Reference,decimal ExpectedTotal);
 public record UserRequest(string Name,string Email,string Role,string? Password,bool Active);
 public static class Workflow {
+ public static bool SameOrder(Order order,OrderRequest request,Guid waiterId)=>order.WaiterId==waiterId&&order.TableId==request.TableId&&order.Instructions==(request.Instructions?.Trim()??"")&&order.Items.OrderBy(i=>i.MenuItemId).Select(i=>(i.MenuItemId,i.Quantity)).SequenceEqual(request.Items.GroupBy(i=>i.MenuItemId).OrderBy(g=>g.Key).Select(g=>(g.Key,g.Sum(i=>i.Quantity))));
+ public static bool IsAcknowledged(string current,string target,string role,bool owner){string[] stages=["New","Preparing","Ready","Served","Paid"];var index=Array.IndexOf(stages,target);return index is >0 and <4&&CanTransition(stages[index-1],target,role,owner)&&Array.IndexOf(stages,current)>=index;}
  public static readonly string[] Roles=["Waiter","Kitchen","Cashier","Admin"];
  public static bool CanTransition(string from,string to,string role,bool owner)=>role=="Admin" ? (from,to) is ("New","Preparing") or ("Preparing","Ready") or ("Ready","Served") : role=="Kitchen" ? (from,to) is ("New","Preparing") or ("Preparing","Ready") : role=="Waiter" && owner && from=="Ready" && to=="Served";
 }

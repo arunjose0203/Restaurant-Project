@@ -1,3 +1,4 @@
+import {orderSignature} from '../../shared/network.mjs';
 export function initialState(){
  const menu=[['Paneer tikka','Smoky tandoor · mint chutney',1,280,true],['Crispy corn','Golden corn · pepper & lime',1,180,true],['Butter chicken','Tandoori chicken · creamy tomato',2,360,false],['Dal makhani','Slow-cooked black lentils',2,260,true],['Veg dum biryani','Fragrant basmati · garden vegetables',2,290,true],['Garlic naan','Tandoor baked · garlic butter',3,70,true],['Jeera rice','Basmati rice · roasted cumin',3,150,true],['Fresh lime soda','Fresh lime · chilled soda',4,90,true],['Mango lassi','Alphonso mango · creamy yogurt',4,140,true],['Gulab jamun','Two warm dumplings · rose syrup',5,120,true]].map((x,i)=>({id:i+1,name:x[0],description:x[1],categoryId:x[2],price:x[3],vegetarian:x[4],active:true}));
  const users=['Waiter','Kitchen','Cashier','Admin'].map((role,i)=>({id:`demo-${role}`,name:['Aarav Sharma','Kitchen team','Priya Mehta','Restaurant admin'][i],email:`${role.toLowerCase()}@demo.local`,role,active:true}));
@@ -8,9 +9,10 @@ export function initialState(){
 export function mutate(s,path,body,user){
  if(path==='/orders'){
  if(!['Waiter','Admin'].includes(user.role))throw Error('Only waiters can place orders.');
+ const previous=body.clientRequestId&&s.orders.find(o=>o.id===body.clientRequestId);if(previous){if(previous.waiterId!==user.id||orderSignature({tableId:previous.tableId,instructions:previous.instructions,items:previous.items})!==orderSignature(body))throw Error('Request ID belongs to another order.');return s;}
  if(!s.tables.some(t=>t.id===body.tableId&&t.active)||!body.items.length)throw Error('Choose a table and at least one item.');
  const items=body.items.map(i=>{const m=s.menu.find(m=>m.id===i.menuItemId&&m.active);if(!m||i.quantity<1||i.quantity>99)throw Error('Invalid item or quantity.');return {menuItemId:m.id,name:m.name,quantity:i.quantity,unitPrice:m.price};});
- let session=s.sessions.find(x=>x.tableId===body.tableId&&!x.closedAt);if(!session){session={id:crypto.randomUUID(),tableId:body.tableId,closedAt:null};s.sessions.push(session);}s.orders.unshift({id:crypto.randomUUID(),sessionId:session.id,tableId:body.tableId,waiterId:user.id,status:'New',instructions:body.instructions||'',createdAt:new Date().toISOString(),items});
+ let session=s.sessions.find(x=>x.tableId===body.tableId&&!x.closedAt);if(!session){session={id:crypto.randomUUID(),tableId:body.tableId,closedAt:null};s.sessions.push(session);}s.orders.unshift({id:body.clientRequestId||crypto.randomUUID(),sessionId:session.id,tableId:body.tableId,waiterId:user.id,status:'New',instructions:body.instructions||'',createdAt:new Date().toISOString(),items});
  }else if(path.includes('/status')){
  const order=s.orders.find(o=>o.id===path.split('/')[2]);if(!order)throw Error('Order not found.');const next={New:'Preparing',Preparing:'Ready',Ready:'Served'}[order.status];if(body.status!==next)throw Error('Invalid status transition.');if(user.role!=='Admin'&&(body.status==='Served'?user.role!=='Waiter'||user.id!==order.waiterId:user.role!=='Kitchen'))throw Error('This action is not permitted.');order.status=next;if(next==='Ready')s.notifications.unshift({id:crypto.randomUUID(),userId:order.waiterId,message:`Food ready · Table ${order.tableId}`,read:false});
  }else if(path.includes('/pay')){
@@ -20,4 +22,3 @@ export function mutate(s,path,body,user){
  }else if(path.startsWith('/notifications/')){const n=s.notifications.find(x=>x.id===path.split('/')[2]&&x.userId===user.id);if(n)n.read=true;}
  else throw Error('Unknown action');return s;
 }
-

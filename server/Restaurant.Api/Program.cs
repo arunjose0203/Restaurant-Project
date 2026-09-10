@@ -19,6 +19,7 @@ if(string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("C
 builder.Services.AddDbContext<RestaurantDb>(o=>o.UseNpgsql(connection));
 builder.Services.AddSingleton<IPasswordHasher<User>,PasswordHasher<User>>();
 builder.Services.AddSignalR();
+builder.Services.AddResponseCompression(o=>{o.EnableForHttps=true;});
 builder.Services.AddCors(o=>o.AddDefaultPolicy(p=>p.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>()??[]).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o=>{
  o.TokenValidationParameters=new(){ValidateIssuer=true,ValidateAudience=true,ValidateIssuerSigningKey=true,ValidateLifetime=true,ValidIssuer=builder.Configuration["Jwt:Issuer"],ValidAudience=builder.Configuration["Jwt:Audience"],IssuerSigningKey=new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),ClockSkew=TimeSpan.FromSeconds(15)};
@@ -29,6 +30,8 @@ builder.Services.AddRateLimiter(o=>o.AddPolicy("login",ctx=>RateLimitPartition.G
 var app=builder.Build();
 app.Use(async(ctx,next)=>{try{await next();}catch(DbUpdateException){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{message="This change conflicts with an existing record. Reload and try again."});}catch(Npgsql.PostgresException ex) when(ex.SqlState=="40001"||ex.SqlState=="40P01"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{message="Another staff member updated this table. Reload and try again."});}});
 app.UseCors();app.UseRateLimiter();app.UseAuthentication();app.UseAuthorization();
+// Compress operational snapshots, never authentication/token responses.
+app.UseWhen(ctx=>ctx.Request.Path=="/api/state"&&HttpMethods.IsGet(ctx.Request.Method),branch=>branch.UseResponseCompression());
 // Schema changes are explicit deployment operations, never automatic on each startup.
 if(args.Contains("--migrate")){using var scope=app.Services.CreateScope();var db=scope.ServiceProvider.GetRequiredService<RestaurantDb>();await db.Database.MigrateAsync();await Seed.Run(db,scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>(),builder.Configuration);return;}
 app.MapGet("/health",()=>Results.Ok(new{status="ok",database="PostgreSQL"}));
@@ -50,20 +53,22 @@ api.MapPost("/orders",async(OrderRequest r,RestaurantDb db,ClaimsPrincipal user,
  if(r.Items is not {Count:>0 and <=100}||r.Items.Any(x=>x.Quantity<1||x.Quantity>99)||(r.Instructions?.Length??0)>500)return Bad("Choose items with quantities from 1 to 99; instructions may contain up to 500 characters.");
  await using var tx=await db.Database.BeginTransactionAsync();
  var table=await db.Tables.FromSqlInterpolated($"SELECT * FROM \"Tables\" WHERE \"Id\" = {r.TableId} FOR UPDATE").SingleOrDefaultAsync();
+ if(r.ClientRequestId==Guid.Empty)return Bad("Invalid order request ID.");
+ if(r.ClientRequestId is Guid requestId){var previous=await db.Orders.Include(o=>o.Items).SingleOrDefaultAsync(o=>o.Id==requestId);if(previous!=null)return Workflow.SameOrder(previous,r,UserId(user))?Results.Ok(previous):Results.Conflict(new{message="This request ID belongs to a different order. Check the earlier order before creating a new one."});}
  if(table==null||!table.Active)return Bad("Table is unavailable.");
  var grouped=r.Items.GroupBy(x=>x.MenuItemId).Select(g=>new ItemRequest(g.Key,g.Sum(x=>x.Quantity))).ToList();if(grouped.Any(x=>x.Quantity>99))return Bad("Maximum quantity is 99 per item.");
  var ids=grouped.Select(x=>x.MenuItemId).ToList();var menu=await db.MenuItems.Where(x=>ids.Contains(x.Id)&&x.Active).ToListAsync();if(menu.Count!=ids.Count)return Bad("A selected menu item is unavailable.");
  var session=await db.Sessions.SingleOrDefaultAsync(x=>x.TableId==r.TableId&&x.ClosedAt==null);if(session==null){session=new(){TableId=r.TableId};db.Sessions.Add(session);}
- var order=new Order{SessionId=session.Id,TableId=r.TableId,WaiterId=UserId(user),Instructions=r.Instructions?.Trim()??"",Items=grouped.Select(x=>new OrderItem{MenuItemId=x.MenuItemId,Quantity=x.Quantity,Name=menu.Single(m=>m.Id==x.MenuItemId).Name,UnitPrice=menu.Single(m=>m.Id==x.MenuItemId).Price}).ToList()};
+ var order=new Order{Id=r.ClientRequestId??Guid.NewGuid(),SessionId=session.Id,TableId=r.TableId,WaiterId=UserId(user),Instructions=r.Instructions?.Trim()??"",Items=grouped.Select(x=>new OrderItem{MenuItemId=x.MenuItemId,Quantity=x.Quantity,Name=menu.Single(m=>m.Id==x.MenuItemId).Name,UnitPrice=menu.Single(m=>m.Id==x.MenuItemId).Price}).ToList()};
  db.Orders.Add(order);db.OrderEvents.Add(new(){OrderId=order.Id,UserId=UserId(user),Status="New"});await db.SaveChangesAsync();await tx.CommitAsync();await Changed(hub);return Results.Created($"/api/orders/{order.Id}",order);
 }).RequireAuthorization(p=>p.RequireRole("Waiter","Admin"));
 api.MapPatch("/orders/{id:guid}/status",async(Guid id,StatusRequest r,RestaurantDb db,ClaimsPrincipal user,IHubContext<OrderHub> hub)=>{
  var tableId=await db.Orders.Where(x=>x.Id==id).Select(x=>(int?)x.TableId).SingleOrDefaultAsync();if(tableId==null)return Results.NotFound();
  await using var tx=await db.Database.BeginTransactionAsync();await db.Tables.FromSqlInterpolated($"SELECT * FROM \"Tables\" WHERE \"Id\" = {tableId.Value} FOR UPDATE").SingleAsync();
- var order=await db.Orders.SingleAsync(x=>x.Id==id);if(!Workflow.CanTransition(order.Status,r.Status,user.FindFirstValue(ClaimTypes.Role)??"",order.WaiterId==UserId(user)))return Results.Conflict(new{message="This transition is not allowed. Reload to see the current status."});
+ var order=await db.Orders.SingleAsync(x=>x.Id==id);var role=user.FindFirstValue(ClaimTypes.Role)??"";var owner=order.WaiterId==UserId(user);if(Workflow.IsAcknowledged(order.Status,r.Status,role,owner))return Results.Ok(order);if(!Workflow.CanTransition(order.Status,r.Status,role,owner))return Results.Conflict(new{message="This transition is not allowed. Reload to see the current status."});
  order.Status=r.Status;order.UpdatedAt=DateTime.UtcNow;db.OrderEvents.Add(new(){OrderId=id,UserId=UserId(user),Status=r.Status});
  Notification? notification=null;if(r.Status=="Ready"){notification=new(){UserId=order.WaiterId,OrderId=id,Message=$"Food ready · Table {order.TableId}"};db.Notifications.Add(notification);}
- await db.SaveChangesAsync();await tx.CommitAsync();await Changed(hub);if(notification!=null)await hub.Clients.User(order.WaiterId.ToString()).SendAsync("FoodReady",notification);return Results.Ok(order);
+ await db.SaveChangesAsync();await tx.CommitAsync();await Changed(hub);if(notification!=null){try{await hub.Clients.User(order.WaiterId.ToString()).SendAsync("FoodReady",notification);}catch{/* Unread notification is durable and recovered by state synchronization. */}}return Results.Ok(order);
 }).RequireAuthorization(p=>p.RequireRole("Kitchen","Waiter","Admin"));
 api.MapPost("/notifications/{id:guid}/read",async(Guid id,RestaurantDb db,ClaimsPrincipal user)=>{var uid=UserId(user);await db.Notifications.Where(x=>x.Id==id&&x.UserId==uid).ExecuteUpdateAsync(s=>s.SetProperty(x=>x.Read,true));return Results.NoContent();});
 api.MapGet("/sessions/{id:guid}/bill",async(Guid id,RestaurantDb db)=>{var s=await db.Sessions.FindAsync(id);if(s==null)return Results.NotFound();var orders=await db.Orders.Include(x=>x.Items).Where(x=>x.SessionId==id).ToListAsync();return Results.Ok(new{session=s,orders,total=orders.Sum(x=>x.Items.Sum(i=>i.Quantity*i.UnitPrice)),canPay=s.ClosedAt==null&&orders.Count>0&&orders.All(x=>x.Status=="Served"),payment=await db.Bills.SingleOrDefaultAsync(x=>x.SessionId==id)});}).RequireAuthorization(p=>p.RequireRole("Cashier","Admin"));

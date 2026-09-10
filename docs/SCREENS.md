@@ -29,4 +29,4 @@ Menu items, Categories, Tables, Users & roles, Payment methods, Daily sales, Ord
 - Disconnected: explicit connection status and retry/reconciliation.
 - Demo: persistent banner stating that online PostgreSQL is not connected.
 
-Tax configuration, payment gateways, stock management, cancellation/refunds, offline order entry, OS background push and printer hardware integration are outside this implementation. Printing is browser-based. No simulated payment is presented as a gateway charge.
+Tax configuration, payment gateways, stock management, cancellation/refunds, automatic offline order dispatch, OS background push and printer hardware integration are outside this implementation. Printing is browser-based. No simulated payment is presented as a gateway charge.

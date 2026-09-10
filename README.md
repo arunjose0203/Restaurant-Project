@@ -53,7 +53,7 @@ Keep one API instance initially. Multiple instances require a SignalR backplane 
 
 ## Web with the real API
 
-Copy `web/.env.example` to `web/.env` and set `VITE_API_URL` to the API origin. For local API development use `http://localhost:5080`. Rebuild after changing this setting. Login uses API-issued JWTs held in memory; refresh signs you out. The server authorizes every API request and validates that the account remains active in its current role.
+Copy `web/.env.example` to `web/.env` and set `VITE_API_URL` to the API origin. For local API development use `http://localhost:5080`. Rebuild after changing this setting. Login uses API-issued JWTs held in memory and tab-scoped session storage until expiry; refresh restores the current shift. The server authorizes every API request and validates that the account remains active in its current role.
 
 ```powershell
 cd web
@@ -72,7 +72,7 @@ npm ci
 npm start
 ```
 
-Use a reachable HTTPS API URL on physical devices, not `localhost`. Mobile tokens are stored in Expo SecureStore. The app uses real native views, supports all four workspaces, resumes state on foreground/reconnect, and displays food-ready alerts while active. Notifications received while suspended are shown from persisted unread notifications when reopening. Background OS push delivery is **not implemented**; it requires Expo/APNs/FCM registration and delivery infrastructure.
+Use a reachable HTTPS API URL on physical devices, not `localhost`. Mobile tokens are stored in Expo SecureStore. The app uses real native views, supports all four workspaces, resumes state on foreground/reconnect, and displays food-ready alerts while active. Drafts and pending order confirmations are persisted locally. Notifications received while suspended are shown from persisted unread notifications when reopening. Background OS push delivery is **not implemented**; it requires Expo/APNs/FCM registration and delivery infrastructure.
 
 Android: `npm run android` with Android SDK installed. iOS: `npm run ios` on macOS with Xcode. Native store signing and EAS accounts are not configured in this workspace.
 
@@ -102,3 +102,7 @@ npx expo export --platform android --output-dir dist
 ```
 
 See `docs/API.md`, `docs/SCREENS.md`, `docs/database.sql`, and `tests/online-smoke.mjs`. The online smoke test requires a **dedicated test database** and running API; it creates test staff, tables, orders and payments. Do not run it against operational restaurant data.
+
+## Slow and unreliable connections
+
+See [LOW-NETWORK.md](docs/LOW-NETWORK.md) for saved drafts, cached screens, safe retry behavior, bandwidth improvements, and the limits of offline operation.

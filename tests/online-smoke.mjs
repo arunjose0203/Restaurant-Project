@@ -16,7 +16,8 @@ await req('/admin/tables/0','PUT',{name:'Forbidden',seats:4,active:true},account
 await req('/state','GET',undefined,undefined,401);
 const hub=new HubConnectionBuilder().withUrl(`${base}/hubs/orders`,{accessTokenFactory:()=>accounts.Waiter.token}).build();let readyCount=0;hub.on('FoodReady',()=>readyCount++);await hub.start();
 try{
-const order=await req('/orders','POST',{tableId:table.id,items:[{menuItemId:menu.id,quantity:2}],instructions:'Integration test'},accounts.Waiter.token,201);
+const order=await req('/orders','POST',{clientRequestId:randomUUID(),tableId:table.id,items:[{menuItemId:menu.id,quantity:2}],instructions:'Integration test'},accounts.Waiter.token,201);
+const repeated=await req('/orders','POST',{clientRequestId:order.id,tableId:table.id,items:[{menuItemId:menu.id,quantity:2}],instructions:'Integration test'},accounts.Waiter.token);assert.equal(repeated.id,order.id);
 const round=await req('/orders','POST',{tableId:table.id,items:[{menuItemId:menu.id,quantity:1}]},accounts.Waiter.token,201);assert.equal(order.sessionId,round.sessionId);
 await req(`/orders/${order.id}/status`,'PATCH',{status:'Served'},accounts.Waiter.token,409);
 await req(`/sessions/${order.sessionId}/pay`,'POST',{paymentMethodId:method.id,expectedTotal:menu.price*3},accounts.Cashier.token,409);

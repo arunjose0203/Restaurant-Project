@@ -22,3 +22,7 @@ Not yet verified:
 The deployed web demo is browser-local and explicitly labeled. It does not demonstrate a live database connection.
 
 Implementation references: [Npgsql EF Core 10](https://www.npgsql.org/efcore/release-notes/10.0.html), [ASP.NET Core SignalR authorization](https://learn.microsoft.com/en-us/aspnet/core/signalr/authn-and-authz?view=aspnetcore-10.0), [Expo SDK 55](https://expo.dev/changelog/sdk-55).
+
+## Low-network update
+
+The updated API has 17 passing role, transition and order-identity tests. The web/shared suite has 8 passing workflow and fault-recovery tests, plus one passing service-worker offline/cache-isolation test. Web production compilation and mobile TypeScript checks pass. See LOW-NETWORK.md for behavior and remaining live-device/database validation limits.

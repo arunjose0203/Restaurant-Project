@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initialState,mutate} from './demo.mjs';
+test('client request ID deduplicates order retries even after table closure',()=>{const s=initialState();const waiter=s.users[0];const body={clientRequestId:crypto.randomUUID(),tableId:1,items:[{menuItemId:1,quantity:1}]};mutate(s,'/orders',body,waiter);s.orders[0].status='Paid';s.sessions.find(x=>x.id===s.orders[0].sessionId).closedAt=new Date().toISOString();mutate(s,'/orders',body,waiter);assert.equal(s.orders.filter(o=>o.id===body.clientRequestId).length,1);assert.throws(()=>mutate(s,'/orders',{...body,tableId:2},waiter),/another order/);});
 test('complete service flow combines rounds, preserves prices and closes once',()=>{
  const s=initialState();const [waiter,kitchen,cashier]=s.users;
  mutate(s,'/orders',{tableId:1,items:[{menuItemId:1,quantity:2}],instructions:'No chilli'},waiter);
