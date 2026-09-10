@@ -1,0 +1,13 @@
+**/node_modules/
+**/bin/
+**/obj/
+**/dist/
+**/.expo/
+**/.env
+**/.env.local
+**/appsettings.Local.json
+*.zip
+*.log
+.tools/
+**/*.tsbuildinfo
+*.tar.gz

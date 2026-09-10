@@ -1,0 +1,1 @@
+{"name":"tableflow","version":"1.0.0","private":true,"scripts":{"build":"npm --prefix web run build && node scripts/copy-web.mjs","dev":"npm --prefix web run dev","test":"npm --prefix web test"}}
