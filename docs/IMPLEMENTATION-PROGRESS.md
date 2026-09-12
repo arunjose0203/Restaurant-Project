@@ -84,11 +84,32 @@ Completed September 12, 2026:
   - `Branch` entity and EF Core global query filters scoping menu, tables, sessions, and orders per branch.
   - Owner endpoints in `server/Restaurant.Api/IdentityEndpoints.cs` to create branches, assign staff roles across branches, and replicate catalog items across locations.
 
+### Phase 6: Commercial Readiness & Operational Gap Remediations
+- **Kitchen & Waiter Ticket Modifier/Portion Visibility**:
+  - Kitchen ticket and waiter views render item portion sizes (`[Half]`, `[Full]`), preparation stations (`Grill`, `Bar`, `Dessert`), and individual selected modifier options (`+ Extra Cheese`) in both web (`web/src/components/Orders.tsx`) and mobile (`mobile/features/OrderTicket.tsx`).
+- **Sequential Fiscal Invoice Numbering**:
+  - Generated upon final settlement in `server/Restaurant.Api/PosService.cs` adhering to standard fiscal format `INV-{BranchId:D2}-{Year}-{Sequence:D5}`.
+  - Stored in `Bill.InvoiceNumber` and returned in receipt endpoints and UI displays.
+- **Refund & Reversal Workflow**:
+  - Dedicated `RefundEntry` entity and `Refunds` table in `server/Restaurant.Api/PosModels.cs`.
+  - Cashier/Admin endpoint `/api/pos/sessions/{id}/refund` with over-refund validation, audit trail logging, and automatic net paid deduction in `PosService.Quote`.
+  - Integrated in web (`web/src/features/cashier/PosBilling.tsx`) and mobile (`mobile/features/PosBilling.tsx`).
+- **Cash Rounding Rules**:
+  - `PosSettings.RoundingRule` (`None` vs `NearestWhole`) applied in `BillingEngine.Calculate`.
+  - Ledger captures `RoundingDelta` line item in quotes, receipts, web billing, and mobile POS displays.
+- **Database Health Check & Rate Limiting**:
+  - `/health` endpoint executes `db.Database.CanConnectAsync()` and reports `{ status: "Healthy", database: "Healthy" }`.
+  - ASP.NET Core RateLimiter `"guest"` policy restricts anonymous guest endpoints to 30 requests/minute per IP.
+- **Continuous Integration (CI) Pipeline**:
+  - GitHub Actions workflow in `.github/workflows/ci.yml` verifying backend build/tests (.NET 10), web tests & build, mobile typecheck, and shared integration tests.
+- **Deterministic Integration Test Suite**:
+  - Automated test runner `scripts/test-pos-api.cjs` managing isolated PostgreSQL and test server lifecycle for `tests/pos-api.test.mjs`.
+
 ---
 
 ## Verification & Test Results
-- **.NET Backend Tests**: 17 / 17 passed (`dotnet test tests/Restaurant.Tests/Restaurant.Tests.csproj`).
-- **POS End-to-End Test**: 1 / 1 suite passed (`node tests/pos-api.test.mjs` validating migrations, customizations, ledger, audit, guest portals, and branch isolation).
-- **Web Frontend Build & Tests**: Build succeeded, 8 / 8 unit tests passed (`npm test` in `web`).
+- **.NET Backend Tests**: 20 / 20 passed (`dotnet test tests/Restaurant.Tests/Restaurant.Tests.csproj` including BillingEngine and RoundingRule tests).
+- **POS Integration Suite**: 100% passed (`node scripts/test-pos-api.cjs` validating migrations, customizations, ledger, sequential invoices, refunds, rounding, audit, guest portals, and branch isolation).
+- **Web Frontend Build & Tests**: Build succeeded, 8 / 8 unit tests passed (`npm test` in `web`, `npm run build`).
 - **Mobile Typecheck & Tests**: 0 TypeScript errors (`npm run typecheck` in `mobile`), 7 / 7 shared network tests passed.
-- **Mobile Android Bundle Export**: Succeeded (`npx expo export --platform android`).
+- **Android Release APK**: Built and apksigner verified at `deliverables/Tableflow-1.0.0.apk`.

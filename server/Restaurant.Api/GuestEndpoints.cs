@@ -9,7 +9,7 @@ public static class GuestEndpoints {
         db.UseBranch(table.BranchId); return table;
     }
     public static void MapGuest(this WebApplication app) {
-        var guest = app.MapGroup("/api/guest/{token}").RequireRateLimiting("login");
+        var guest = app.MapGroup("/api/guest/{token}").RequireRateLimiting("guest");
         guest.MapGet("", async (string token, RestaurantDb db) => {
             var table = await Table(db, token); if (table is null) return Results.NotFound();
             var settings = await PosService.Settings(db);

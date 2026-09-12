@@ -16,18 +16,30 @@ public static class PosEndpoints {
             if (taxes.Count > 10 || taxes.Any(t => string.IsNullOrWhiteSpace(t.Name) || t.Name.Length > 60 || t.Percent is < 0 or > 100) || r.ServicePercent is < 0 or > 100 || r.BusinessName.Length > 100 || r.Address.Length > 500 || r.TaxId.Length > 100 || r.UpiId.Length > 100 || r.ReceiptFooter.Length > 300) throw new ArgumentException("Invalid receipt or tax configuration.");
             var settings = await db.Settings.SingleOrDefaultAsync();
             if (settings is null) { settings = new(); db.Settings.Add(settings); }
-            settings.BusinessName = r.BusinessName; settings.Address = r.Address; settings.TaxId = r.TaxId; settings.UpiId = r.UpiId; settings.TaxRulesJson = JsonSerializer.Serialize(taxes); settings.ServicePercent = r.ServicePercent; settings.ReceiptFooter = r.ReceiptFooter;
+            settings.BusinessName = r.BusinessName; settings.Address = r.Address; settings.TaxId = r.TaxId; settings.UpiId = r.UpiId; settings.TaxRulesJson = JsonSerializer.Serialize(taxes); settings.ServicePercent = r.ServicePercent; settings.ReceiptFooter = r.ReceiptFooter; settings.RoundingRule = r.RoundingRule == "NearestWhole" ? "NearestWhole" : "None";
             PosService.Audit(db, PosService.Actor(actor), "Settings", "Billing", "Configuration changed", settings);
             await db.SaveChangesAsync(); return Results.Ok(settings);
         });
         cash.MapGet("/sessions/{id:guid}", async (Guid id, RestaurantDb db) => {
             var session = await db.Sessions.SingleOrDefaultAsync(s => s.Id == id); if (session is null) return Results.NotFound();
-            return Results.Ok(new { session, quote = await PosService.Quote(db, session), payments = await db.Payments.Where(p => p.SessionId == id).OrderBy(p => p.CreatedAt).ToListAsync() });
+            var bill = await db.Bills.SingleOrDefaultAsync(b => b.SessionId == id);
+            return Results.Ok(new {
+                session,
+                quote = await PosService.Quote(db, session),
+                payments = await db.Payments.Where(p => p.SessionId == id).OrderBy(p => p.CreatedAt).ToListAsync(),
+                refunds = await db.Refunds.Where(r => r.SessionId == id).OrderBy(r => r.CreatedAt).ToListAsync(),
+                bill
+            });
         });
         cash.MapPost("/sessions/{id:guid}/payments", async (Guid id, PaymentRequest r, RestaurantDb db, ClaimsPrincipal user) => {
             await using var tx = await db.Database.BeginTransactionAsync();
             var session = await PosService.LockSession(db, id); if (session is null) return Results.NotFound();
             var payment = await PosService.Pay(db, session, r, PosService.Actor(user)); await tx.CommitAsync(); return Results.Ok(payment);
+        });
+        cash.MapPost("/sessions/{id:guid}/refund", async (Guid id, RefundRequest r, RestaurantDb db, ClaimsPrincipal user) => {
+            await using var tx = await db.Database.BeginTransactionAsync();
+            var session = await PosService.LockSession(db, id); if (session is null) return Results.NotFound();
+            var refund = await PosService.Refund(db, session, r, PosService.Actor(user)); await tx.CommitAsync(); return Results.Ok(refund);
         });
         admin.MapPost("/sessions/{id:guid}/discount", async (Guid id, DiscountRequest r, RestaurantDb db, ClaimsPrincipal user) => {
             if (string.IsNullOrWhiteSpace(r.Reason) || r.Reason.Length > 300) throw new ArgumentException("A discount reason is required (up to 300 characters).");

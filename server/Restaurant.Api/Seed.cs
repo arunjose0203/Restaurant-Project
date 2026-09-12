@@ -12,5 +12,23 @@ public static class Seed {
  foreach(var user in await db.Users.ToListAsync()){if(!await db.StaffBranches.AnyAsync(m=>m.UserId==user.Id&&m.BranchId==1))db.StaffBranches.Add(new(){UserId=user.Id,BranchId=1,Role=user.Role});}
  if(!await db.Users.AnyAsync(u=>u.Owner)){var owner=await db.Users.FirstOrDefaultAsync(u=>u.Role=="Admin"&&u.Active);if(owner!=null)owner.Owner=true;}
  await db.SaveChangesAsync();
+ await db.Database.ExecuteSqlRawAsync("""
+    ALTER TABLE "Bills" ADD COLUMN IF NOT EXISTS "InvoiceNumber" text NOT NULL DEFAULT '';
+    ALTER TABLE "Settings" ADD COLUMN IF NOT EXISTS "RoundingRule" text NOT NULL DEFAULT 'None';
+    CREATE TABLE IF NOT EXISTS "Refunds" (
+        "Id" uuid NOT NULL PRIMARY KEY,
+        "BranchId" integer NOT NULL DEFAULT 1,
+        "SessionId" uuid NOT NULL,
+        "CashierId" uuid NOT NULL,
+        "Amount" numeric(12,2) NOT NULL,
+        "Reason" text NOT NULL,
+        "PaymentMethodId" integer NOT NULL,
+        "CreatedAt" timestamp with time zone NOT NULL,
+        CONSTRAINT "CK_Refund_Positive" CHECK ("Amount" > 0),
+        CONSTRAINT "FK_Refunds_Sessions" FOREIGN KEY ("SessionId") REFERENCES "Sessions" ("Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_Refunds_PaymentMethods" FOREIGN KEY ("PaymentMethodId") REFERENCES "PaymentMethods" ("Id") ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS "IX_Bills_Branch_Invoice" ON "Bills" ("BranchId", "InvoiceNumber");
+  """);
  }
 }

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Restaurant.Api;
 using OpenTelemetry.Resources;
@@ -19,7 +20,7 @@ var key=builder.Configuration["Jwt:Key"]??"";
 if(key.Length<32) throw new InvalidOperationException("Configure Jwt:Key with at least 32 random characters.");
 if(string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("Configure ConnectionStrings:Restaurant with your online PostgreSQL connection string.");
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddDbContext<RestaurantDb>(o=>o.UseNpgsql(connection));
+builder.Services.AddDbContext<RestaurantDb>(o=>o.UseNpgsql(connection).ConfigureWarnings(w=>w.Ignore(RelationalEventId.PendingModelChangesWarning)));
 builder.Services.AddSingleton<IPasswordHasher<User>,PasswordHasher<User>>();
 var signalR=builder.Services.AddSignalR();
 if(!string.IsNullOrWhiteSpace(builder.Configuration["Redis:Connection"]))signalR.AddStackExchangeRedis(builder.Configuration["Redis:Connection"]!,o=>o.Configuration.ChannelPrefix=StackExchange.Redis.RedisChannel.Literal(builder.Configuration["Redis:Prefix"]??"tableflow"));
@@ -33,7 +34,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
  o.Events=new(){OnMessageReceived=c=>{if(c.HttpContext.Request.Path.StartsWithSegments("/hubs/orders"))c.Token=c.Request.Query["access_token"];return Task.CompletedTask;},OnTokenValidated=async c=>{var db=c.HttpContext.RequestServices.GetRequiredService<RestaurantDb>();db.UseBranch(int.TryParse(c.Principal?.FindFirst("branch")?.Value,out var bid)?bid:1);var id=c.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);var role=c.Principal?.FindFirstValue(ClaimTypes.Role);if(!Guid.TryParse(id,out var uid)||!await db.Users.AnyAsync(u=>u.Id==uid&&u.Active))c.Fail("Account is inactive.");else if(!await db.StaffBranches.AnyAsync(m=>m.UserId==uid&&m.BranchId==db.CurrentBranchId&&m.Role==role)||!await db.Branches.AnyAsync(b=>b.Id==db.CurrentBranchId&&b.Active))c.Fail("Branch access changed.");}};
 });
 builder.Services.AddAuthorization();
-builder.Services.AddRateLimiter(o=>o.AddPolicy("login",ctx=>RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new(){PermitLimit=10,Window=TimeSpan.FromMinutes(1),QueueLimit=0}))); 
+builder.Services.AddRateLimiter(o=>{
+ o.AddPolicy("login",ctx=>RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new(){PermitLimit=10,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
+ o.AddPolicy("guest",ctx=>RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString()??"unknown",_=>new(){PermitLimit=30,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
+}); 
 var app=builder.Build();
 app.Use(async(ctx,next)=>{try{await next();}catch(ArgumentException ex){ctx.Response.StatusCode=400;await ctx.Response.WriteAsJsonAsync(new{message=ex.Message});}catch(System.Text.Json.JsonException){ctx.Response.StatusCode=400;await ctx.Response.WriteAsJsonAsync(new{message="Invalid configuration JSON."});}catch(DbUpdateException){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{message="This change conflicts with an existing record. Reload and try again."});}catch(Npgsql.PostgresException ex) when(ex.SqlState=="40001"||ex.SqlState=="40P01"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{message="Another staff member updated this table. Reload and try again."});}});
 app.UseCors();app.UseRateLimiter();app.UseAuthentication();app.UseAuthorization();
@@ -41,7 +45,7 @@ app.UseCors();app.UseRateLimiter();app.UseAuthentication();app.UseAuthorization(
 app.UseWhen(ctx=>ctx.Request.Path=="/api/state"&&HttpMethods.IsGet(ctx.Request.Method),branch=>branch.UseResponseCompression());
 // Schema changes are explicit deployment operations, never automatic on each startup.
 if(args.Contains("--migrate")){using var scope=app.Services.CreateScope();var db=scope.ServiceProvider.GetRequiredService<RestaurantDb>();await db.Database.MigrateAsync();await Seed.Run(db,scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>(),builder.Configuration);return;}
-app.MapGet("/health",()=>Results.Ok(new{status="ok",database="PostgreSQL"}));
+app.MapGet("/health",async(RestaurantDb db)=>{try{var ok=await db.Database.CanConnectAsync();return ok?Results.Ok(new{status="Healthy",database="Healthy"}):Results.Problem("Database unavailable",statusCode:503);}catch{return Results.Problem("Database connection error",statusCode:503);}});
 app.MapIdentity();
 var api=app.MapGroup("/api").RequireAuthorization();
 api.MapGet("/state",async(RestaurantDb db,ClaimsPrincipal user)=>{

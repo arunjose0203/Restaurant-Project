@@ -16,6 +16,7 @@ public class PosSettings : BranchRecord {
     public string TaxRulesJson { get; set; } = "[]";
     public decimal ServicePercent { get; set; }
     public string ReceiptFooter { get; set; } = "Thank you for dining with us.";
+    public string RoundingRule { get; set; } = "None";
 }
 public record TaxRule(string Name, decimal Percent);
 public class PaymentEntry : BranchRecord {
@@ -26,6 +27,15 @@ public class PaymentEntry : BranchRecord {
     public decimal Amount { get; set; }
     public string Reference { get; set; } = "";
     public string ProviderPaymentId { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+public class RefundEntry : BranchRecord {
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid SessionId { get; set; }
+    public Guid CashierId { get; set; }
+    public decimal Amount { get; set; }
+    public string Reason { get; set; } = "";
+    public int PaymentMethodId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 public class AuditEntry : BranchRecord {
@@ -81,8 +91,9 @@ public record ModifierOption(string Name, decimal Price);
 public record ModifierGroup(string Name, bool Required, List<ModifierOption> Options);
 public record SelectedModifier(string Group, string Option);
 public record BillTax(string Name, decimal Amount);
-public record BillQuote(decimal Subtotal, decimal Discount, decimal ServiceCharge, List<BillTax> Taxes, decimal Tip, decimal Total, decimal Paid, decimal Outstanding);
+public record BillQuote(decimal Subtotal, decimal Discount, decimal ServiceCharge, List<BillTax> Taxes, decimal Tip, decimal Total, decimal Paid, decimal Outstanding, decimal RoundingDelta = 0);
 public record PaymentRequest(Guid RequestId, int PaymentMethodId, decimal Amount, decimal ExpectedTotal, string? Reference);
+public record RefundRequest(decimal Amount, string Reason, int? PaymentMethodId = null);
 public record DiscountRequest(string Kind, decimal Value, string Reason);
 public record SplitPart(string Name, decimal Amount, List<Guid>? ItemIds);
 public record SplitRequest(string Mode, int Guests, List<SplitPart>? Parts);
@@ -108,8 +119,14 @@ public static class BillingEngine {
         var rules = JsonSerializer.Deserialize<List<TaxRule>>(settings.TaxRulesJson) ?? [];
         if (settings.ServicePercent is < 0 or > 100 || rules.Any(r => r.Percent is < 0 or > 100)) throw new ArgumentException("Invalid tax or service percentage.");
         var taxes = rules.Select(r => new BillTax(r.Name, Round((net + service) * r.Percent / 100))).ToList();
-        var total = Round(net + service + taxes.Sum(t => t.Amount) + tip);
-        return new(subtotal, discount, service, taxes, Round(tip), total, paid, Round(total - paid));
+        var rawTotal = Round(net + service + taxes.Sum(t => t.Amount) + tip);
+        decimal roundingDelta = 0;
+        decimal total = rawTotal;
+        if (settings.RoundingRule == "NearestWhole") {
+            total = decimal.Round(rawTotal, 0, MidpointRounding.AwayFromZero);
+            roundingDelta = Round(total - rawTotal);
+        }
+        return new(subtotal, discount, service, taxes, Round(tip), total, paid, Round(total - paid), roundingDelta);
     }
     public static decimal[] SplitEqual(decimal total, int guests) {
         if (guests is < 1 or > 100 || total < 0 || Round(total) != total) throw new ArgumentException("Choose 1–100 guests and a valid total.");
@@ -129,6 +146,9 @@ public static class PosSchema {
         m.Entity<PaymentEntry>().HasOne<PaymentMethod>().WithMany().HasForeignKey(x => x.PaymentMethodId).OnDelete(DeleteBehavior.Restrict);
         m.Entity<PaymentEntry>().HasIndex(x => x.ProviderPaymentId).IsUnique().HasFilter("\"ProviderPaymentId\" <> ''");
         m.Entity<PaymentEntry>().ToTable("Payments", t => t.HasCheckConstraint("CK_Payment_Positive", "\"Amount\" > 0"));
+        m.Entity<RefundEntry>().HasOne<TableSession>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<RefundEntry>().HasOne<PaymentMethod>().WithMany().HasForeignKey(x => x.PaymentMethodId).OnDelete(DeleteBehavior.Restrict);
+        m.Entity<RefundEntry>().ToTable("Refunds", t => t.HasCheckConstraint("CK_Refund_Positive", "\"Amount\" > 0"));
         m.Entity<AuditEntry>(); m.Entity<GuestRequest>();
         m.Entity<GuestFeedback>().HasIndex(x => x.SessionId).IsUnique();
         m.Entity<DeviceToken>().HasIndex(x => x.Token).IsUnique();

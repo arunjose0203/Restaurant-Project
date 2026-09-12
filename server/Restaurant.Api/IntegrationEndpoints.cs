@@ -90,11 +90,16 @@ public static class IntegrationEndpoints {
         } else if (kind == "bill") {
             if (!user.IsInRole("Cashier") && !user.IsInRole("Admin")) throw new ArgumentException("Cashier access required.");
             var session = await db.Sessions.SingleOrDefaultAsync(s => s.Id == id) ?? throw new ArgumentException("Visit not found."); var quote = await PosService.Quote(db, session);
-            heading = $"BILL / Table {session.TableId} / {id.ToString()[..8]}";
+            var bill = await db.Bills.SingleOrDefaultAsync(b => b.SessionId == id);
+            var invLabel = string.IsNullOrEmpty(bill?.InvoiceNumber) ? id.ToString()[..8] : bill.InvoiceNumber;
+            heading = $"BILL / Table {session.TableId} / {invLabel}";
             lines.Add(settings.Address); lines.Add("Tax ID: " + settings.TaxId);
+            if (!string.IsNullOrEmpty(bill?.InvoiceNumber)) lines.Add("Invoice: " + bill.InvoiceNumber);
             var orders = await db.Orders.Include(o => o.Items).Where(o => o.SessionId == id && o.Status != "Voided").ToListAsync();
             lines.AddRange(orders.SelectMany(o => o.Items).Select(i => $"{i.Quantity} x {i.Name}  INR {i.Quantity * i.UnitPrice:0.00}"));
-            lines.Add($"Subtotal {quote.Subtotal:0.00}"); lines.Add($"Discount -{quote.Discount:0.00}"); lines.Add($"Service {quote.ServiceCharge:0.00}"); lines.AddRange(quote.Taxes.Select(t => $"{t.Name} {t.Amount:0.00}")); lines.Add($"Tip {quote.Tip:0.00}"); lines.Add($"TOTAL INR {quote.Total:0.00}"); lines.Add($"PAID {quote.Paid:0.00}"); lines.Add($"BALANCE {quote.Outstanding:0.00}");
+            lines.Add($"Subtotal {quote.Subtotal:0.00}"); lines.Add($"Discount -{quote.Discount:0.00}"); lines.Add($"Service {quote.ServiceCharge:0.00}"); lines.AddRange(quote.Taxes.Select(t => $"{t.Name} {t.Amount:0.00}")); lines.Add($"Tip {quote.Tip:0.00}");
+            if (quote.RoundingDelta != 0) lines.Add($"Rounding {(quote.RoundingDelta > 0 ? "+" : "")}{quote.RoundingDelta:0.00}");
+            lines.Add($"TOTAL INR {quote.Total:0.00}"); lines.Add($"PAID {quote.Paid:0.00}"); lines.Add($"BALANCE {quote.Outstanding:0.00}");
         } else throw new ArgumentException("Choose kot or bill.");
         return ReceiptRenderer.Render(settings.BusinessName, heading, lines, settings.ReceiptFooter, width);
     }

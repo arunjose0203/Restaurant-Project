@@ -13,7 +13,8 @@ public static class PosService {
     }
     public static async Task<PosSettings> Settings(RestaurantDb db) => await db.Settings.SingleOrDefaultAsync() ?? new PosSettings();
     public static async Task<BillQuote> Quote(RestaurantDb db, TableSession session) {
-        var paid = await db.Payments.Where(p => p.SessionId == session.Id).SumAsync(p => p.Amount);
+        var paid = await db.Payments.Where(p => p.SessionId == session.Id).SumAsync(p => p.Amount)
+                 - await db.Refunds.Where(r => r.SessionId == session.Id).SumAsync(r => r.Amount);
         if (session.QuoteJson.Length > 0) {
             var frozen = JsonSerializer.Deserialize<BillQuote>(session.QuoteJson)!;
             return frozen with { Paid = paid, Outstanding = BillingEngine.Round(frozen.Total - paid) };
@@ -92,9 +93,44 @@ public static class PosService {
         Audit(db, cashier, "Payment", session.Id.ToString(), "Confirmed tender", new { payment.Id, payment.Amount, payment.PaymentMethodId });
         if (r.Amount == quote.Outstanding) {
             session.ClosedAt = DateTime.UtcNow;
-            db.Bills.Add(new() { SessionId = session.Id, TableId = session.TableId, CashierId = cashier, Total = quote.Total, PaymentMethodId = r.PaymentMethodId, Reference = r.Reference ?? "", QuoteJson = session.QuoteJson });
+            var year = DateTime.UtcNow.Year;
+            var count = await db.Bills.CountAsync(b => b.PaidAt.Year == year) + 1;
+            var invoiceNumber = $"INV-{db.CurrentBranchId:D2}-{year}-{count:D5}";
+            db.Bills.Add(new() {
+                SessionId = session.Id,
+                TableId = session.TableId,
+                CashierId = cashier,
+                Total = quote.Total,
+                PaymentMethodId = r.PaymentMethodId,
+                Reference = r.Reference ?? "",
+                QuoteJson = session.QuoteJson,
+                InvoiceNumber = invoiceNumber
+            });
             foreach (var order in orders) { order.Status = "Paid"; order.UpdatedAt = DateTime.UtcNow; db.OrderEvents.Add(new() { OrderId = order.Id, UserId = cashier, Status = "Paid" }); }
         }
         await db.SaveChangesAsync(); return payment;
+    }
+    public static async Task<RefundEntry> Refund(RestaurantDb db, TableSession session, RefundRequest r, Guid cashier) {
+        if (r.Amount <= 0 || BillingEngine.Round(r.Amount) != r.Amount || string.IsNullOrWhiteSpace(r.Reason) || r.Reason.Length > 200)
+            throw new ArgumentException("Provide a positive refund amount with two decimals and a reason up to 200 characters.");
+        var netPaid = await db.Payments.Where(p => p.SessionId == session.Id).SumAsync(p => p.Amount)
+                    - await db.Refunds.Where(r => r.SessionId == session.Id).SumAsync(r => r.Amount);
+        if (r.Amount > netPaid)
+            throw new ArgumentException("Refund amount exceeds the net total paid on this visit.");
+        var lastPayment = await db.Payments.Where(p => p.SessionId == session.Id).OrderByDescending(p => p.CreatedAt).FirstOrDefaultAsync();
+        var methodId = r.PaymentMethodId ?? lastPayment?.PaymentMethodId ?? (await db.PaymentMethods.FirstAsync(m => m.Active)).Id;
+        var refund = new RefundEntry {
+            Id = Guid.NewGuid(),
+            SessionId = session.Id,
+            CashierId = cashier,
+            Amount = r.Amount,
+            Reason = r.Reason.Trim(),
+            PaymentMethodId = methodId,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.Refunds.Add(refund);
+        Audit(db, cashier, "Refund", session.Id.ToString(), r.Reason.Trim(), new { refund.Id, r.Amount, PaymentMethodId = methodId });
+        await db.SaveChangesAsync();
+        return refund;
     }
 }
