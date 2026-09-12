@@ -1,0 +1,6 @@
+import { ArrowRight,UtensilsCrossed } from 'lucide-react';
+import { useState } from 'react';
+import { login } from '../../api';
+import type { User } from '../../types';
+
+export function Login({onLogin}:{onLogin:(u:User)=>void}){const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);return <div className="login-page"><div className="login-card"><div className="brand"><span className="brand-icon"><UtensilsCrossed/></span>tableflow.</div><h1>Welcome to your shift.</h1><p>Sign in to your restaurant workspace.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);try{onLogin(await login(email,password));}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><label className="field-label">Email<input autoComplete="username" type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><label className="field-label">Password<input autoComplete="current-password" type="password" required value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p className="error">{error}</p>}<button className="primary full" disabled={busy}>{busy?'Signing in…':'Sign in'}<ArrowRight size={18}/></button></form></div></div>;}

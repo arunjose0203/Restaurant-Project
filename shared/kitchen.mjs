@@ -1,0 +1,1 @@
+export function kitchenAge(createdAt,now=Date.now()) {const elapsed=Math.max(0,now-Date.parse(createdAt));const minutes=Number.isFinite(elapsed)?Math.floor(elapsed/60000):0;return {minutes,level:elapsed>15*60000?'delayed':elapsed>=10*60000?'warning':'normal'};}

@@ -1,0 +1,7 @@
+import {useState} from 'react';
+import {request,download} from '../../api';
+export function PrintButton({kind,id}:{kind:'kot'|'bill';id:string}){
+ const [error,setError]=useState('');const [width,setWidth]=useState(48);const [busy,setBusy]=useState(false);
+ async function print(network:boolean){setBusy(true);setError('');try{if(network){await request(`/pos/print/${kind}/${id}`,'POST',{printer:kind==='kot'?'kitchen':'cashier',width});setError('Sent. Check the printer before reprinting.');}else{const text=await download(`/pos/print/${kind}/${id}?width=${width}`);const frame=document.createElement('iframe');frame.style.position='fixed';frame.style.width='0';frame.style.height='0';document.body.append(frame);const doc=frame.contentDocument!;const pre=doc.createElement('pre');pre.textContent=await text.text();doc.body.append(pre);frame.contentWindow!.focus();frame.contentWindow!.print();setTimeout(()=>frame.remove(),60000);}}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ return <div className="pos-actions"><select aria-label="Paper width" value={width} onChange={e=>setWidth(Number(e.target.value))}><option value={32}>58 mm</option><option value={48}>80 mm</option></select><button className="secondary" disabled={busy} onClick={()=>void print(false)}>Print {kind==='kot'?'KOT':'bill'}</button><button className="secondary" disabled={busy} onClick={()=>void print(true)}>Send to thermal printer</button>{error&&<small role="status">{error}</small>}</div>;
+}

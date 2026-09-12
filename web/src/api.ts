@@ -6,19 +6,19 @@ export const apiUrl=(import.meta as any).env.VITE_API_URL?.replace(/\/$/,'')||''
 export const demo=!apiUrl;
 let token='';let currentUser:User|null=null;
 const scope=`tableflow:${apiUrl||'demo'}:`;
-export const userKey=(id:string,kind:string)=>`${scope}${id}:${kind}`;
+export const userKey=(id:string,kind:string)=>`${scope}${currentUser?.branchId||1}:${id}:${kind}`;
 function read(storage:Storage,key:string){try{return JSON.parse(storage.getItem(key)||'null');}catch{return null;}}
 export function restoreSession():User|null{const s=read(sessionStorage,scope+'session');if(s&&Date.parse(s.expires)>Date.now()){token=s.token;currentUser=s.user;return s.user;}return null;}
 export function cachedState(user:User|null):State|null{if(!user)return null;const c=read(sessionStorage,userKey(user.id,'state'));return c&&Date.now()-c.at<86400000?c.value:null;}
 export function readDraft(userId:string){return read(localStorage,userKey(userId,'draft'));}
 export function writeDraft(userId:string,draft:unknown){localStorage.setItem(userKey(userId,'draft'),JSON.stringify(draft));}
 export function getPending(userId:string){return read(localStorage,userKey(userId,'pending'));}
-export const draftBody=(d:any)=>({tableId:d.table,items:Object.entries(d.cart||{}).filter(([,q])=>Number(q)>0).map(([id,q])=>({menuItemId:Number(id),quantity:Number(q)})),instructions:d.notes||''});
+export const draftBody=(d:any)=>({tableId:d.table,items:d.lines||Object.entries(d.cart||{}).filter(([,q])=>Number(q)>0).map(([id,q])=>({menuItemId:Number(id),quantity:Number(q)})),instructions:d.notes||''});
 const emit=(name:string,detail?:unknown)=>window.dispatchEvent(new CustomEvent(name,{detail}));
 export async function request(path:string,method='GET',body?:unknown):Promise<any>{
  if(!navigator.onLine)throw new RequestError('You are offline. Keep your draft and reconnect before sending.');
  try{return await jsonRequest(`${apiUrl}/api${path}`,{method,body,token});}
- catch(e){if(e instanceof RequestError&&e.status===401&&path!=='/auth/login')emit('session-expired');if(!(e instanceof RequestError)||!e.status)emit('connection-lost');throw e;}
+ catch(e){if(e instanceof RequestError&&e.status===401&&!['/auth/login','/auth/pin-login'].includes(path))emit('session-expired');if(!(e instanceof RequestError)||!e.status)emit('connection-lost');throw e;}
 }
 export function demoState():State{try{return JSON.parse(localStorage.getItem('tableflow-demo-v1')||'null')||initialState();}catch{return initialState() as State;}}
 export async function login(email:string,password:string){const r=await request('/auth/login','POST',{email,password});token=r.token;currentUser=r.user;try{sessionStorage.setItem(scope+'session',JSON.stringify(r));}catch{/* Current-tab session still works in memory. */}return r.user as User;}
@@ -46,3 +46,5 @@ export function subscribe(refresh:()=>Promise<void>,notify:(s:string)=>void,conn
  void start();const fallback=setInterval(()=>{if(!document.hidden&&navigator.onLine)sync();},90000);
  return()=>{stopped=true;clearTimeout(retry);clearTimeout(debounce);clearInterval(fallback);window.removeEventListener('offline',offline);window.removeEventListener('online',online);window.removeEventListener('connection-lost',offline);document.removeEventListener('visibilitychange',visible);void hub.stop();};
 }
+export async function acceptSession(session:any){token=session.token;currentUser=session.user;sessionStorage.setItem(scope+'session',JSON.stringify(session));window.location.reload();}
+export async function download(path:string){const response=await fetch(apiUrl+'/api'+path,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error('Download failed ('+response.status+').');return response.blob();}

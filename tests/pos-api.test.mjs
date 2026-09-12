@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+const base=process.env.TABLEFLOW_TEST_URL||'http://127.0.0.1:5189';
+async function call(path,method='GET',body,token='',expected=200){const response=await fetch(base+'/api'+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body===undefined?undefined:JSON.stringify(body)});const text=await response.text();assert.equal(response.status,expected,`${method} ${path}: ${text}`);return text?JSON.parse(text):null;}
+test('POS migration, customization, ledger, audit, guests, and branch isolation',async()=>{
+ const auth=await call('/auth/login','POST',{email:'admin@pos.test',password:'Test-only-password-123!'});const token=auth.token;
+ const state=await call('/state','GET',undefined,token);assert.ok(state.menu.length);assert.equal(auth.user.owner,true);
+ const table=await call('/admin/tables/0','PUT',{name:'Test '+crypto.randomUUID(),seats:4,active:true,section:'Test',x:20,y:30},token);
+ const item=await call('/admin/menu/0','PUT',{name:'Test curry '+crypto.randomUUID(),categoryId:state.categories[0].id,price:100,active:true,vegetarian:true,available:true,stock:5,station:'Grill',portionsJson:JSON.stringify([{Name:'Full',Price:100}]),modifiersJson:JSON.stringify([{Name:'Extra',Required:true,Options:[{Name:'Cheese',Price:10}]}])},token);
+ await call('/pos/admin/settings','PUT',{businessName:'Test House',address:'Test road',taxId:'TEST',upiId:'',taxRulesJson:JSON.stringify([{Name:'CGST',Percent:2.5},{Name:'SGST',Percent:2.5}]),servicePercent:0,receiptFooter:'Thanks'},token);
+ const request={clientRequestId:crypto.randomUUID(),tableId:table.id,items:[{menuItemId:item.id,quantity:2,portion:'Full',modifiers:[{group:'Extra',option:'Cheese'}]}],instructions:'No chilli'};
+ const order=await call('/orders','POST',request,token);assert.equal(order.items[0].unitPrice,110);assert.equal(order.items[0].station,'Grill');
+ const retry=await call('/orders','POST',request,token);assert.equal(retry.id,order.id);
+ await call('/orders','POST',{...request,items:[{...request.items[0],quantity:1}]},token,400);
+ await call('/pos/admin/sessions/'+order.sessionId+'/discount','POST',{kind:'Percent',value:10,reason:'Pilot discount'},token);
+ await call('/orders/'+order.id+'/status','PATCH',{status:'Preparing'},token);await call('/orders/'+order.id+'/status','PATCH',{status:'Ready'},token);await call('/orders/'+order.id+'/status','PATCH',{status:'Served'},token);
+ let bill=await call('/pos/sessions/'+order.sessionId,'GET',undefined,token);assert.equal(bill.quote.total,207.9);assert.equal(bill.quote.discount,22);
+ const split=await call('/pos/sessions/'+order.sessionId+'/split','POST',{mode:'Equal',guests:3},token);assert.equal(split.reduce((n,p)=>n+Math.round(p.amount*100),0),20790);
+ const payment={requestId:crypto.randomUUID(),paymentMethodId:state.paymentMethods[0].id,amount:100,expectedTotal:207.9,reference:'cash test'};
+ await call('/pos/sessions/'+order.sessionId+'/payments','POST',payment,token);await call('/pos/sessions/'+order.sessionId+'/payments','POST',payment,token);
+ bill=await call('/pos/sessions/'+order.sessionId,'GET',undefined,token);assert.equal(bill.payments.length,1);assert.equal(bill.quote.outstanding,107.9);
+ await call('/pos/admin/sessions/'+order.sessionId+'/discount','POST',{kind:'Flat',value:5,reason:'Too late'},token,400);
+ await call('/orders','POST',{...request,clientRequestId:crypto.randomUUID()},token,400);
+ await call('/pos/sessions/'+order.sessionId+'/payments','POST',{...payment,requestId:crypto.randomUUID(),amount:108},token,400);
+ await call('/pos/sessions/'+order.sessionId+'/payments','POST',{...payment,requestId:crypto.randomUUID(),amount:107.9},token);
+ bill=await call('/pos/sessions/'+order.sessionId,'GET',undefined,token);assert.ok(bill.session.closedAt);assert.equal(bill.quote.outstanding,0);
+ const branch=await call('/owner/branches','POST',{name:'Other '+crypto.randomUUID(),timeZone:'Asia/Kolkata'},token);
+ const switched=await call('/auth/branch/'+branch.id,'POST',{},token);const foreign=await call('/state','GET',undefined,switched.token);assert.equal(foreign.orders.length,0);assert.equal(foreign.menu.length,0);
+ await call('/pos/sessions/'+order.sessionId,'GET',undefined,switched.token,404);
+ await call('/admin/menu/'+item.id,'PUT',item,switched.token,400);
+ await call('/auth/pin','POST',{pin:'1234'},token);const unlocked=await call('/auth/pin-login','POST',{userId:auth.user.id,pin:'1234',branchId:1},token);assert.equal(unlocked.user.id,auth.user.id);
+ const guest=await call('/guest/'+table.guestToken);assert.equal(guest.table.id,table.id);
+ await call('/guest/'+table.guestToken+'/request','POST',{kind:'Bill'});
+ await call('/guest/'+table.guestToken+'/feedback','POST',{sessionId:order.sessionId,rating:5,comment:'Good'});
+ const next=await call('/orders','POST',{...request,clientRequestId:crypto.randomUUID(),items:[{...request.items[0],quantity:1}]},token);
+ await call('/pos/admin/orders/'+next.id+'/void','POST',{reason:'Kitchen Error'},token);
+ const audit=await call('/pos/admin/audit','GET',undefined,token);assert.ok(audit.some(a=>a.action==='Void'));assert.ok(audit.some(a=>a.action==='Payment'));
+ const from=new Date(Date.now()-3600000).toISOString();const to=new Date(Date.now()+3600000).toISOString();const report=await call(`/pos/admin/report?from=${from}&to=${to}`,'GET',undefined,token);assert.ok(report.tenderCollected>=207.9);
+});
+

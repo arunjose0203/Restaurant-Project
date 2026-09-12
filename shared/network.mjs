@@ -23,7 +23,7 @@ export async function jsonRequest(url,{method='GET',body,token='',timeoutMs=1500
 }
 // Collapse event bursts into one request, with one follow-up if an event arrives in flight.
 export function coalescedRefresh(work){let running=null,again=false;return function refresh(){if(running){again=true;return running;}running=(async()=>{do{again=false;await work();}while(again);})().finally(()=>{running=null;});return running;};}
-export function orderSignature(body){return JSON.stringify({tableId:body.tableId,instructions:(body.instructions||'').trim(),items:[...body.items].sort((a,b)=>a.menuItemId-b.menuItemId).map(i=>({menuItemId:i.menuItemId,quantity:i.quantity}))});}
+export function orderSignature(body){const items=body.items.map(i=>({menuItemId:i.menuItemId,quantity:i.quantity,portion:i.portion||'',modifiers:[...(i.modifiers||[])].sort((a,b)=>a.group.localeCompare(b.group))}));items.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));return JSON.stringify({tableId:body.tableId,instructions:(body.instructions||'').trim(),items});}
 // Persist before sending. A different order cannot replace an unconfirmed submission.
 export async function sendOrder({read,write,remove,send,body,uuid}){
   let pending=await read();

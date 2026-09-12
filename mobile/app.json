@@ -20,7 +20,9 @@
     },
     "plugins": [
       "expo-secure-store",
-      "./plugins/with-release-android"
+      "./plugins/with-release-android",
+      "expo-notifications",
+      "./plugins/with-thermal-printer"
     ]
   }
 }

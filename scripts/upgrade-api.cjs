@@ -1,0 +1,26 @@
+const fs=require('node:fs');const file='server/Restaurant.Api/Program.cs';let s=fs.readFileSync(file,'utf8');
+s=s.replace('builder.Services.AddDbContext','builder.Services.AddHttpContextAccessor();\nbuilder.Services.AddDbContext');
+s=s.replace('var id=c.Principal?', 'db.UseBranch(int.TryParse(c.Principal?.FindFirst("branch")?.Value,out var bid)?bid:1);var id=c.Principal?');
+s=s.replace('u=>u.Id==uid&&u.Active&&u.Role==role','u=>u.Id==uid&&u.Active');
+s=s.replace('c.Fail("Account is inactive or role changed.");','c.Fail("Account is inactive.");else if(!await db.StaffBranches.AnyAsync(m=>m.UserId==uid&&m.BranchId==db.CurrentBranchId&&m.Role==role)||!await db.Branches.AnyAsync(b=>b.Id==db.CurrentBranchId&&b.Active))c.Fail("Branch access changed.");');
+s=s.replace('catch(DbUpdateException)', 'catch(ArgumentException ex){ctx.Response.StatusCode=400;await ctx.Response.WriteAsJsonAsync(new{message=ex.Message});}catch(System.Text.Json.JsonException){ctx.Response.StatusCode=400;await ctx.Response.WriteAsJsonAsync(new{message="Invalid configuration JSON."});}catch(DbUpdateException)');
+const loginStart=s.indexOf('app.MapPost("/api/auth/login"');const loginEnd=s.indexOf('var api=app.MapGroup',loginStart);
+s=s.slice(0,loginStart)+'app.MapIdentity();\n'+s.slice(loginEnd);
+const orderStart=s.indexOf('api.MapPost("/orders"');const orderEnd=s.indexOf('api.MapPatch("/orders/',orderStart);
+s=s.slice(0,orderStart)+`api.MapPost("/orders",async(OrderRequest r,RestaurantDb db,ClaimsPrincipal user)=>{await using var tx=await db.Database.BeginTransactionAsync();var order=await PosService.CreateOrder(db,r with {ClientRequestId=r.ClientRequestId??Guid.NewGuid()},UserId(user));await tx.CommitAsync();return Results.Ok(order);}).RequireAuthorization(p=>p.RequireRole("Waiter","Admin"));
+`+s.slice(orderEnd);
+s=s.replace('var order=await db.Orders.SingleAsync(x=>x.Id==id);','var order=await db.Orders.SingleAsync(x=>x.Id==id);await PosService.LockSession(db,order.SessionId);');
+s=s.replace('db.Notifications.Add(notification);','db.Notifications.Add(notification);db.Outbox.Add(new(){Kind="FoodReady",UserId=order.WaiterId,Payload=System.Text.Json.JsonSerializer.Serialize(notification)});');
+const payStart=s.indexOf('api.MapPost("/sessions/{id:guid}/pay"');const payEnd=s.indexOf('var admin=api.MapGroup',payStart);
+s=s.slice(0,payStart)+`api.MapPost("/sessions/{id:guid}/pay",async(Guid id,PayRequest r,RestaurantDb db,ClaimsPrincipal user)=>{
+ await using var tx=await db.Database.BeginTransactionAsync();var session=await PosService.LockSession(db,id);if(session==null)return Results.NotFound();var existing=await db.Bills.SingleOrDefaultAsync(b=>b.SessionId==id);if(existing!=null)return Results.Ok(existing);var quote=await PosService.Quote(db,session);await PosService.Pay(db,session,new(Guid.NewGuid(),r.PaymentMethodId,quote.Outstanding,r.ExpectedTotal,r.Reference),UserId(user));await tx.CommitAsync();return Results.Ok(await db.Bills.SingleAsync(b=>b.SessionId==id));
+}).RequireAuthorization(p=>p.RequireRole("Cashier","Admin"));
+`+s.slice(payEnd);
+s=s.replace('orders=await orders.Where', 'guestRequests=await db.GuestRequests.Where(r=>!r.Resolved).ToListAsync(),orders=await orders.Where');
+s=s.replace('row.Name=r.Name.Trim();row.Description=r.Description;', 'MenuConfiguration.Validate(r);row.Available=r.Available;row.Stock=r.Stock;row.Station=r.Station;row.PortionsJson=r.PortionsJson;row.ModifiersJson=r.ModifiersJson;row.PhotoUrl=r.PhotoUrl;row.Name=r.Name.Trim();row.Description=r.Description;');
+s=s.replace('row.Name=r.Name.Trim();row.Seats=r.Seats;', 'if(r.X is <0 or >1000||r.Y is <0 or >1000||r.Section.Length>80)return Bad("Invalid floor position or section.");row.Section=r.Section;row.X=r.X;row.Y=r.Y;row.Name=r.Name.Trim();row.Seats=r.Seats;');
+s=s.replace('if(id==Guid.Empty)db.Users.Add(row);','if(id==Guid.Empty){db.Users.Add(row);db.StaffBranches.Add(new(){UserId=row.Id,BranchId=db.CurrentBranchId,Role=row.Role});}else {var membership=await db.StaffBranches.SingleOrDefaultAsync(m=>m.UserId==id&&m.BranchId==db.CurrentBranchId);if(membership==null)return Results.NotFound();membership.Role=r.Role;}');
+s=s.replace('app.MapHub<OrderHub>', 'app.MapPos();\napp.MapGuest();\napp.MapIntegrations();\napp.MapHub<OrderHub>');
+s=s.replace('builder.Services.AddSignalR();','builder.Services.AddSignalR();\nbuilder.Services.AddHttpClient();\nbuilder.Services.AddHostedService<OutboxWorker>();');
+s=s.replace('await hub.Clients.All.SendAsync("StateChanged");','await Task.CompletedTask;');
+fs.writeFileSync(file,s);
