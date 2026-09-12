@@ -1,0 +1,30 @@
+TABLEFLOW FOR ANDROID
+
+Install Tableflow-1.0.0.apk on an Android phone (Android 7.0 or later).
+
+1. Transfer the APK to your phone.
+2. Open it in Files/Downloads and allow installation from that app if prompted.
+3. Open Tableflow.
+4. Enter your restaurant's HTTPS server address, then tap Connect & continue.
+5. Sign in with the staff account created by your restaurant administrator.
+
+You do not need Expo Go to run this APK.
+
+NO SERVER YET?
+You can install the APK now and connect later. Login, shared orders, kitchen
+updates and billing require a deployed Tableflow server. There is no default
+staff password. The app will remain on the setup screen until you connect.
+
+FEATURES
+- Waiter: select tables, create orders, save drafts and mark food served.
+- Kitchen: view tickets and mark them preparing or ready.
+- Cashier: review bills and confirm received payments.
+- Admin: manage menu, tables, staff and payment methods; view sales/history.
+
+Food-ready notifications appear while the app is active. Background push
+notifications are not included. Orders and payments need a server connection.
+
+UPDATES
+Keep the app installed when updating to another APK signed with the same key.
+Uninstalling clears its local drafts and settings. Back up the project's
+mobile/signing folder privately to preserve the ability to issue updates.

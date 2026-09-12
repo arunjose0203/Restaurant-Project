@@ -1,0 +1,14 @@
+{$APP_DOMAIN} {
+    encode zstd gzip
+    @backend path /api/* /hubs/* /health
+    handle @backend {
+        reverse_proxy api:8080
+    }
+    handle {
+        root * /srv
+        @shell path / /index.html /sw.js
+        header @shell Cache-Control "no-cache"
+        try_files {path} /index.html
+        file_server
+    }
+}

@@ -11,3 +11,7 @@
 .tools/
 **/*.tsbuildinfo
 *.tar.gz
+mobile/signing/
+mobile/android/
+*.apk
+*.aab

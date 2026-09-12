@@ -1,1 +1,26 @@
-{"expo":{"name":"Tableflow","slug":"tableflow-restaurant","version":"1.0.0","orientation":"portrait","userInterfaceStyle":"light","ios":{"supportsTablet":true,"bundleIdentifier":"com.tableflow.restaurant"},"android":{"package":"com.tableflow.restaurant"},"plugins":["expo-secure-store"]}}
+{
+  "expo": {
+    "name": "Tableflow",
+    "slug": "tableflow-restaurant",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tableflow.restaurant"
+    },
+    "android": {
+      "package": "com.tableflow.restaurant",
+      "versionCode": 1,
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "./plugins/with-release-android"
+    ]
+  }
+}

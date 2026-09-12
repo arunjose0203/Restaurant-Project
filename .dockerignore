@@ -1,0 +1,13 @@
+.git
+.tools
+**/node_modules
+**/dist
+**/bin
+**/obj
+**/.expo
+**/.env
+**/.env.local
+**/appsettings.Local.json
+**/*.tsbuildinfo
+*.zip
+*.tar.gz

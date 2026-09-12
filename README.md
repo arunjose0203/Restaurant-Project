@@ -74,6 +74,8 @@ npm start
 
 Use a reachable HTTPS API URL on physical devices, not `localhost`. Mobile tokens are stored in Expo SecureStore. The app uses real native views, supports all four workspaces, resumes state on foreground/reconnect, and displays food-ready alerts while active. Drafts and pending order confirmations are persisted locally. Notifications received while suspended are shown from persisted unread notifications when reopening. Background OS push delivery is **not implemented**; it requires Expo/APNs/FCM registration and delivery infrastructure.
 
+The standalone Android app now includes a server setup screen: enter your deployed HTTPS server address on the phone without rebuilding. A build-time `EXPO_PUBLIC_API_URL` is optional. See [mobile/README.md](mobile/README.md) for APK installation and the signed release build script. Shared operations require a deployed server; the setup screen remains available before hosting is configured.
+
 Android: `npm run android` with Android SDK installed. iOS: `npm run ios` on macOS with Xcode. Native store signing and EAS accounts are not configured in this workspace.
 
 ## Workflow and permissions
