@@ -1,7 +1,15 @@
+import {useState} from 'react';
+import {View,Text,Pressable} from 'react-native';
 import type {useWorkspace} from '../hooks/useWorkspace';
-import {OrderComposer} from './OrderComposer';
-import {PosBilling} from './PosBilling';
-import {Button,s,money,sum} from '../ui';
-import {View,Text,ScrollView,TextInput,Pressable,Alert} from 'react-native';
 import type {Order} from '../../web/src/types';
-export function KitchenScreen({workspace,card}:{workspace:ReturnType<typeof useWorkspace>;card:(o:Order)=>React.ReactNode}){const {localKey,token,setToken,setUser,setData,role,setRole,tab,setTab,email,setEmail,password,setPassword,busy,setBusy,error,setError,live,setLive,table,setTable,cart,setCart,instructions,setInstructions,query,setQuery,category,setCategory,paymentMethod,setPaymentMethod,reference,setReference,adminSection,setAdminSection,edit,setEdit,lastSync,setLastSync,syncError,setSyncError,syncing,setSyncing,pending,setPending,draftReady,setDraftReady,draftError,setDraftError,posting,currentAuth,draftRef,writes,api,refresh,run,signIn,field,API,sessionKey,onChangeServer}=workspace;const data=workspace.data!;const user=workspace.user!;const own=data.orders.filter(o=>role!=='Waiter'||o.waiterId===user.id);return  <>{['New', 'Preparing', 'Ready'].map(status => <View key={status}><Text style={s.h2}>{status} · {data.orders.filter(o => o.status === status).length}</Text>{data.orders.filter(o => o.status === status).map(card)}</View>)}</>;}
+import {s} from '../ui';
+export function KitchenScreen({workspace,card}:{workspace:ReturnType<typeof useWorkspace>;card:(o:Order)=>React.ReactNode}){
+ const [status,setStatus]=useState('New');
+ const orders=workspace.data?.orders||[];
+ const visible=orders.filter(o=>o.status===status);
+ return <View style={{gap:16}}>
+  <View style={s.sectionTabs}>{['New','Preparing','Ready'].map(value=><Pressable key={value} accessibilityRole="tab" accessibilityState={{selected:status===value}} onPress={()=>setStatus(value)} style={[s.sectionTab,status===value&&s.sectionTabActive]}><Text style={[s.sectionTabText,status===value&&s.sectionTabTextActive]}>{value} · {orders.filter(o=>o.status===value).length}</Text></Pressable>)}</View>
+  <Text style={s.meta}>{status==='New'?'Start the next ticket when your station is ready.':status==='Preparing'?'Mark dishes ready when they can leave the kitchen.':'These orders are ready for the service team.'}</Text>
+  {visible.length?visible.map(card):<View style={[s.card,s.empty]}><Text style={s.h2}>{status==='New'?'All caught up':`No ${status.toLowerCase()} orders`}</Text><Text style={s.meta}>New updates will appear here automatically.</Text></View>}
+ </View>;
+}
